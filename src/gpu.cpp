@@ -23,7 +23,7 @@ amdgpu_files amdgpu {};
 bool checkNvidia(const char *pci_dev){
     bool nvSuccess = false;
 #ifdef HAVE_NVML
-    nvSuccess = checkNVML(pci_dev) && getNVMLInfo({});
+    nvSuccess = checkNVML(pci_dev);// && getNVMLInfo({});
 #endif
 #ifdef HAVE_XNVCTRL
     if (!nvSuccess)
@@ -123,7 +123,7 @@ void getAmdGpuInfo(){
             value = 0;
         gpu_info.fan_speed = value;
     }
-    
+
     if (amdgpu.vram_total) {
         rewind(amdgpu.vram_total);
         fflush(amdgpu.vram_total);
