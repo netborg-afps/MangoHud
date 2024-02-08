@@ -4,7 +4,7 @@ Frame-latencies are an important part of the gamer's quest to input-lag. This br
 
 In some cases the measurements are directly showing the input lag from receiving a mouse message to the first pixel rendered onto the screen, however there are additional factors to consider, like does the game engine process the inputs quickly to be part of the rendered frame (Unity for example takes two frames instead one to get the input to the display), or is there a compositor involved which is hidden to the game/application (there is not if the presentation is done via flip).
 
-As a further feature of this branch, MangoHud can now limit the number of frames generated on the CPU before displaying them onto the screen via the `render_ahead_limit` config parameter. A value of 1 is currently chosen as default, as it's a good balance between latency and fps. A value of 0 might be a good choice if you value low latency very highly, but this must be taken with caution as this option may come with a serious fps penalty.
+As a further feature of this branch, MangoHud can now limit the number of frames generated on the CPU before displaying them onto the screen via the `render_ahead_limit` config parameter. A value of 1 is currently chosen as default, as it's a good balance between latency and fps. A value of 0 might be a good choice if you value low latency very highly, but this must be taken with caution as this option may come with a serious fps penalty. A value of -1 disables any use of vkWaitForPresent other than for measurements. Take note, that if a game used vkWaitForPresent for its framepacing, this is currently completely overridden.
 
 ```
 MANGOHUD_CONFIG=gpu_stats=0,render_ahead_limit=1 mangohud

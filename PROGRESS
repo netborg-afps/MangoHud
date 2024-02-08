@@ -1,0 +1,22 @@
+
+Feedback:
+- This has only been tested on Nvidia and some amount of games.
+- Wondering about why vkWaitForPresentKHR having such a large cpu-usage impact on my system.
+  It seems to be implemented as a spinlock on Nvidia, how about AMD/Intel GPU?
+- Any crashes / freezes / bugs?
+
+Features todo:
+- Currently using the already available frametime graph to write the latency into (hack),
+  add proper integration of framelatency for displaying together with frametime
+  and add it to the logging functionality.
+- Potentially replace frametime measurements as well as we now have the true present timings.
+- Currently limited to Vulkan, potentially look into OpenGL to get same/similar functionality.
+- The vkWaitForPresentKHR hook is currently a dummy to prevent issues from mixing presentIds
+  of mangohud and the game - which makes the game latency-unaware. Possibly we could support
+  a mapping of game presentIds to MangoHud presentIds.
+- Only use vkWaitForPresentKHR in one thread, as it is potentially a cpu-intensive operation?!
+
+Fixme todo:
+- Prevent concurrent access of vkDestroySwapchainKHR and vkWaitForPresentKHR.
+- We have set VkDeviceCreateInfo.pEnabledFeatures = nullptr, need to look into.
+- May need to re-check Vulkan extension loading.
