@@ -748,7 +748,7 @@ void HudElements::frame_timing(){
         ImGui::PushFont(HUDElements.sw_stats->font1);
         if (!HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_horizontal] && !HUDElements.params->enabled[OVERLAY_PARAM_ENABLED_hud_compact]){
             ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
-            HUDElements.TextColored(HUDElements.colors.engine, "%s", "Frametime");
+            HUDElements.TextColored(HUDElements.colors.engine, "%s", "Framelatency"); // HACK
             ImGui::TableSetColumnIndex(ImGui::TableGetColumnCount() - 1);
             ImGui::Dummy(ImVec2(0.0f, real_font_size.y));
             right_aligned_text(HUDElements.colors.text, ImGui::GetContentRegionAvail().x, "min: %.1fms, max: %.1fms", min_frametime, max_frametime);

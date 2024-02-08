@@ -26,6 +26,7 @@
 #include "fps_metrics.h"
 #include "intel.h"
 #include "msm.h"
+#include "frame_stats.h"
 
 #ifdef __linux__
 #include <libgen.h>
@@ -243,17 +244,41 @@ void stop_hw_updater()
 }
 
 void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const struct overlay_params& params, uint32_t vendorID, uint64_t frametime_ns){
-   uint32_t f_idx = sw_stats.n_frames % ARRAY_SIZE(sw_stats.frames_stats);
+
    uint64_t now = os_time_get_nano(); /* ns */
    auto elapsed = now - sw_stats.last_fps_update; /* ns */
-   float frametime_ms = frametime_ns / 1000000.f;
 
-   if (sw_stats.last_present_time) {
-        sw_stats.frames_stats[f_idx].stats[OVERLAY_PLOTS_frame_timing] =
-            frametime_ns;
-      frametime_data.push_back(frametime_ms);
+
+
+
+   // HACK: using the frametime graph to display latency
+   static uint32_t frametime_us = 0;
+   static unique_ptr<FrameStatsReader> reader;
+   if (!reader && g_frameStatsStorage)
+      reader = make_unique<FrameStatsReader>( g_frameStatsStorage->getReader() );
+
+   FrameStats stats;
+   if (reader && reader->getNext(stats)) {
+      frametime_data.push_back(stats.latency/1000.0f);
       frametime_data.erase(frametime_data.begin());
+      frametime_us = stats.latency;
    }
+
+   float frametime_ms = frametime_us/1000.0f;
+
+
+   // float frametime_ms = frametime_ns / 1000000.f;
+   // if (sw_stats.last_present_time) {
+   //      uint32_t f_idx = sw_stats.n_frames % ARRAY_SIZE(sw_stats.frames_stats);
+   //      sw_stats.frames_stats[f_idx].stats[OVERLAY_PLOTS_frame_timing] =
+   //          frametime_ns;
+   //    frametime_data.push_back(frametime_ms);
+   //    frametime_data.erase(frametime_data.begin());
+   // }
+
+
+
+
 #ifdef __linux__
    if (throttling)
       throttling->update();

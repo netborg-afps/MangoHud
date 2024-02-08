@@ -45,6 +45,9 @@
 #include <vulkan/vk_layer.h>
 #include <vulkan/vk_util.h>
 #include "vk_enum_to_str.h"
+#include "vulkan_update.h"
+#include "vulkan_extensions.h"
+#include "vulkan_presenter.h"
 
 #include "overlay.h"
 #include "notify.h"
@@ -95,6 +98,9 @@ struct device_data {
    struct queue_data *graphic_queue;
 
    std::vector<struct queue_data *> queues;
+
+   // vtable may get extended?
+   PFN_vkWaitForPresentKHR fpWaitForPresentKHR;
 };
 
 /* Mapped from VkCommandBuffer */
@@ -180,6 +186,9 @@ struct swapchain_data {
 std::mutex global_lock;
 typedef std::lock_guard<std::mutex> scoped_lock;
 std::unordered_map<uint64_t, void *> vk_object_to_data;
+
+std::unique_ptr<Presenter> g_presenter = std::make_unique<Presenter>();
+std::unique_ptr<FrameStatsStorage> g_frameStatsStorage;
 
 thread_local ImGuiContext* __MesaImGui;
 
@@ -1655,7 +1664,17 @@ static VkResult overlay_QueuePresentKHR(
          present_info.waitSemaphoreCount = 1;
       }
 
-      VkResult chain_result = queue_data->device->vtable.QueuePresentKHR(queue, &present_info);
+      VkResult chain_result;
+      if( g_presenter && queue_data->device->fpWaitForPresentKHR && i==0 )
+         chain_result = g_presenter->present(
+            queue,
+            &present_info,
+            swapchain_data->device->device,
+            queue_data->device->vtable.QueuePresentKHR,
+            queue_data->device->fpWaitForPresentKHR
+         );
+      else chain_result = queue_data->device->vtable.QueuePresentKHR(queue, &present_info);
+
       if (pPresentInfo->pResults)
          pPresentInfo->pResults[i] = chain_result;
       if (chain_result != VK_SUCCESS && result == VK_SUCCESS)
@@ -1669,6 +1688,19 @@ static VkResult overlay_QueuePresentKHR(
    }
 
    return result;
+}
+
+static VkResult overlay_WaitForPresentKHR(
+    VkDevice                                    device,
+    VkSwapchainKHR                              swapchain,
+    uint64_t                                    presentId,
+    uint64_t                                    timeout)
+{
+   // make this a dummy function since we are using present wait ourselves
+   // NOTE: takes away the ability for the app to measure latency
+   // in order to support this we would need to map the app's presentIds to the internal ones
+   // SPDLOG_INFO("overlay_WaitForPresentKHR dummy");
+   return VK_SUCCESS;
 }
 
 static VkResult overlay_BeginCommandBuffer(
@@ -1793,39 +1825,14 @@ static VkResult overlay_CreateDevice(
    // Advance the link info for the next element on the chain
    chain_info->u.pLayerInfo = chain_info->u.pLayerInfo->pNext;
 
+   PFN_vkGetPhysicalDeviceFeatures2KHR fpGetPhysicalDeviceFeatures2KHR
+      = (PFN_vkGetPhysicalDeviceFeatures2KHR) fpGetInstanceProcAddr( instance_data->instance, "vkGetPhysicalDeviceFeatures2KHR" );
 
-   std::vector<const char*> enabled_extensions(pCreateInfo->ppEnabledExtensionNames,
-                                               pCreateInfo->ppEnabledExtensionNames +
-                                               pCreateInfo->enabledExtensionCount);
+   SPDLOG_INFO("physical device features 2 loaded : {}", (bool) fpGetPhysicalDeviceFeatures2KHR);
+   bool driverPropertiesAvailable = instance_data->api_version >= VK_API_VERSION_1_2;
 
-   uint32_t extension_count;
-
-   instance_data->vtable.EnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extension_count, nullptr);
-
-   std::vector<VkExtensionProperties> available_extensions(extension_count);
-   instance_data->vtable.EnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extension_count, available_extensions.data());
-
-
-   bool can_get_driver_info = instance_data->api_version < VK_API_VERSION_1_1 ? false : true;
-
-   // VK_KHR_driver_properties became core in 1.2
-   if (instance_data->api_version < VK_API_VERSION_1_2 && can_get_driver_info) {
-      for (auto& extension : available_extensions) {
-         if (extension.extensionName == std::string(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME)) {
-            for (auto& enabled : enabled_extensions) {
-               if (enabled == std::string(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME))
-                  goto DONT;
-            }
-            enabled_extensions.push_back(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME);
-            DONT:
-            goto FOUND;
-         }
-      }
-      can_get_driver_info = false;
-      FOUND:;
-   }
-
-   VkResult result = fpCreateDevice(physicalDevice, pCreateInfo, pAllocator, pDevice);
+   const VkDeviceCreateInfo* createInfo = registerDeviceExtensions( pCreateInfo, instance_data->vtable, physicalDevice, fpGetPhysicalDeviceFeatures2KHR, driverPropertiesAvailable );
+   VkResult result = fpCreateDevice(physicalDevice, createInfo, pAllocator, pDevice);
    if (result != VK_SUCCESS) return result;
 
    struct device_data *device_data = new_device_data(*pDevice, instance_data);
@@ -1836,24 +1843,35 @@ static VkResult overlay_CreateDevice(
                                                      &device_data->properties);
 
    VkLayerDeviceCreateInfo *load_data_info =
-      get_device_chain_info(pCreateInfo, VK_LOADER_DATA_CALLBACK);
+      get_device_chain_info(createInfo, VK_LOADER_DATA_CALLBACK);
    device_data->set_device_loader_data = load_data_info->u.pfnSetDeviceLoaderData;
 
    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
    driverProps.pNext = nullptr;
-   if (can_get_driver_info) {
+
+   if( driverPropertiesAvailable ) {
       VkPhysicalDeviceProperties2 deviceProps = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driverProps};
-      instance_data->vtable.GetPhysicalDeviceProperties2(device_data->physical_device, &deviceProps);
+      if (instance_data->api_version >= VK_API_VERSION_1_1) {
+         instance_data->vtable.GetPhysicalDeviceProperties2(device_data->physical_device, &deviceProps);
+      } else {
+         PFN_vkGetPhysicalDeviceProperties2KHR fpGetPhysicalDeviceProperties2KHR =
+            (PFN_vkGetPhysicalDeviceProperties2KHR) fpGetInstanceProcAddr( instance_data->instance, "vkGetPhysicalDeviceProperties2KHR" );
+         if (fpGetPhysicalDeviceProperties2KHR)
+            fpGetPhysicalDeviceProperties2KHR(device_data->physical_device, &deviceProps);
+      }
    }
 
    if (!is_blacklisted()) {
-      device_map_queues(device_data, pCreateInfo);
+      device_map_queues(device_data, createInfo);
 #ifdef __linux__
       gpu = device_data->properties.deviceName;
       SPDLOG_DEBUG("gpu: {}", gpu);
 #endif
       init_gpu_stats(device_data->properties.vendorID, device_data->properties.deviceID, device_data->instance->params);
    }
+
+   device_data->fpWaitForPresentKHR = (PFN_vkWaitForPresentKHR)fpGetDeviceProcAddr( device_data->device, "vkWaitForPresentKHR" );
+   SPDLOG_INFO("wait for present loaded: {}", (bool) device_data->fpWaitForPresentKHR);
 
    return result;
 }
@@ -1896,9 +1914,8 @@ static VkResult overlay_CreateInstance(
       else if (engineName == "vkd3d")
          engine = VKD3D;
 
-      else if(engineName == "mesa zink") {
+      else if(engineName == "mesa zink")
          engine = ZINK;
-      }
 
       else if (engineName == "Damavand")
          engine = DAMAVAND;
@@ -1922,8 +1939,9 @@ static VkResult overlay_CreateInstance(
    // Advance the link info for the next element on the chain
    chain_info->u.pLayerInfo = chain_info->u.pLayerInfo->pNext;
 
+   const VkInstanceCreateInfo* createInfo = registerInstanceExtensions( pCreateInfo );
 
-   VkResult result = fpCreateInstance(pCreateInfo, pAllocator, pInstance);
+   VkResult result = fpCreateInstance(createInfo, pAllocator, pInstance);
    if (result != VK_SUCCESS) return result;
 
    struct instance_data *instance_data = new_instance_data(*pInstance);
@@ -1966,7 +1984,7 @@ static VkResult overlay_CreateInstance(
       instance_data->engineVersion = engineVersion;
    }
 
-   instance_data->api_version = pCreateInfo->pApplicationInfo ? pCreateInfo->pApplicationInfo->apiVersion : VK_API_VERSION_1_0;
+   instance_data->api_version = createInfo->pApplicationInfo ? createInfo->pApplicationInfo->apiVersion : VK_API_VERSION_1_0;
 
    return result;
 }
@@ -2049,6 +2067,7 @@ static const struct {
 
    ADD_HOOK(CreateSwapchainKHR),
    ADD_HOOK(QueuePresentKHR),
+   ADD_HOOK(WaitForPresentKHR),
    ADD_HOOK(DestroySwapchainKHR),
    ADD_HOOK(CreateSampler),
 
