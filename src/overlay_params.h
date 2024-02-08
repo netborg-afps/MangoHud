@@ -193,6 +193,7 @@ typedef unsigned long KeySym;
    OVERLAY_PARAM_CUSTOM(fps_text)                    \
    OVERLAY_PARAM_CUSTOM(device_battery)              \
    OVERLAY_PARAM_CUSTOM(fps_metrics)                 \
+   OVERLAY_PARAM_CUSTOM(render_ahead_limit)          \
 
 enum overlay_param_position {
    LAYER_POSITION_TOP_LEFT,
@@ -251,6 +252,7 @@ struct overlay_params {
    uint32_t fps_sampling_period; /* ns */
    std::vector<std::uint32_t> fps_limit;
    enum fps_limit_method fps_limit_method;
+   int8_t render_ahead_limit;
    bool help;
    bool no_display;
    bool full;

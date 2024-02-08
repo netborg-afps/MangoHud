@@ -39,6 +39,7 @@
 
 #include "app/mangoapp.h"
 #include "fps_metrics.h"
+#include "vulkan_presenter.h"
 
 std::unique_ptr<fpsMetrics> fpsmetrics;
 
@@ -492,6 +493,7 @@ parse_fps_metrics(const char *str){
 #define parse_custom_text(s) parse_str(s)
 #define parse_fps_value(s) parse_load_value(s)
 #define parse_fps_color(s) parse_load_color(s)
+#define parse_render_ahead_limit(s) parse_signed(s)
 #define parse_battery_color(s) parse_color(s)
 #define parse_media_player_format(s) parse_str_tokenize(s, ";", false)
 #define parse_fsr_steam_sharpness(s) parse_float(s)
@@ -678,6 +680,7 @@ static void set_param_defaults(struct overlay_params *params){
    params->control = -1;
    params->fps_limit = { 0 };
    params->fps_limit_method = FPS_LIMIT_METHOD_LATE;
+   params->render_ahead_limit = 1;
    params->vsync = -1;
    params->gl_vsync = -2;
    params->offset_x = 0;
@@ -924,6 +927,7 @@ parse_overlay_config(struct overlay_params *params,
       fps_limit_stats.targetFrameTime = {};
 
    fps_limit_stats.method = params->fps_limit_method;
+   g_presenter->setRenderAheadLimit(params->render_ahead_limit);
 
 #ifdef HAVE_DBUS
    if (params->enabled[OVERLAY_PARAM_ENABLED_media_player]) {
